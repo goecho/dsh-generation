@@ -17,6 +17,7 @@ import {
   renderPresetYml,
   summarizeWorkerSession,
   waitUntilIdle,
+  DEFAULT_RUN_TIMEOUT_MS,
 } from '../src/index.js'
 
 function message(role, text) {
@@ -203,6 +204,31 @@ test('waitUntilIdle cancels the worker when the parent signal aborts', async () 
   controller.abort()
   assert.equal(await waiting, 'cancelled')
   assert.deepEqual(cancelled, [{ kind: 'parent' }])
+})
+
+test('waitUntilIdle times out and cancels the worker', async () => {
+  const cancelled = []
+  let resolveIdle
+  const idle = new Promise((resolve) => { resolveIdle = resolve })
+  const agent = {
+    cancel(cause) {
+      cancelled.push(cause)
+      resolveIdle()
+    },
+    whenIdle: async () => idle,
+  }
+  assert.equal(await waitUntilIdle(agent, undefined, { timeoutMs: 20 }), 'timeout')
+  assert.deepEqual(cancelled, [{ kind: 'parent' }])
+})
+
+test('generation_run declares a cooperative timeout', () => {
+  const tool = createRunTool({
+    agentPresets: {
+      composedPreset: () => 'cordis',
+      async read() { return '' },
+    },
+  })
+  assert.equal(tool.timeoutMs, DEFAULT_RUN_TIMEOUT_MS)
 })
 
 test('mutations require approval while downstream veto is preserved', async () => {

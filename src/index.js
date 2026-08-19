@@ -23,6 +23,8 @@ export const PRESET_ID = /^[a-z0-9][a-z0-9-]*$/
 const MAX_PURPOSE = 500
 const MAX_TASK = 100_000
 const MAX_ASSISTANT_CHARS = 4_000
+/** Cooperative deadline for `generation_run` if the worker never goes idle. */
+export const DEFAULT_RUN_TIMEOUT_MS = 15 * 60 * 1000
 
 const GENERATION_SECTION = [
   'You can fork a working-agent preset and run a task on the next generation.',
@@ -234,51 +236,50 @@ function requireString(args, key, { max }) {
   return { value }
 }
 
-export async function waitUntilIdle(agent, signal) {
+function cancelWorker(agent) {
+  try {
+    agent.cancel({ kind: 'parent' })
+  } catch {
+    // Already idle or already cancelling.
+  }
+}
+
+/**
+ * Wait until the worker is idle, or until the parent signal / deadline fires.
+ * Cancellation always goes through `agent.cancel({ kind: 'parent' })`.
+ */
+export async function waitUntilIdle(agent, signal, { timeoutMs } = {}) {
   const idle = agent.whenIdle()
-  const abort = () => {
-    try {
-      agent.cancel({ kind: 'parent' })
-    } catch {
-      // Already idle or already cancelling.
-    }
+  let timedOut = false
+  let timer
+
+  const onParentAbort = () => cancelWorker(agent)
+  signal?.addEventListener('abort', onParentAbort, { once: true })
+  if (signal?.aborted) cancelWorker(agent)
+  if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true
+      cancelWorker(agent)
+    }, timeoutMs)
   }
 
-  if (signal?.aborted) {
-    abort()
-    try {
-      await idle
-    } catch {
-      // Driver may reject on cancel; quiescence is what we need.
-    }
+  try {
+    await idle
+  } catch (error) {
+    if (!(signal?.aborted || timedOut)) throw error
     try {
       await agent.whenIdle()
     } catch {
-      // ignore
+      // Driver may reject on cancel; quiescence is what we need.
     }
-    return 'cancelled'
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    signal?.removeEventListener('abort', onParentAbort)
   }
 
-  if (signal === undefined) {
-    await idle
-    return 'idle'
-  }
-
-  return await new Promise((resolve, reject) => {
-    const onAbort = () => abort()
-    signal.addEventListener('abort', onAbort, { once: true })
-    idle.then(
-      () => {
-        signal.removeEventListener('abort', onAbort)
-        resolve(signal.aborted ? 'cancelled' : 'idle')
-      },
-      (error) => {
-        signal.removeEventListener('abort', onAbort)
-        if (signal.aborted) resolve('cancelled')
-        else reject(error)
-      },
-    )
-  })
+  if (signal?.aborted) return 'cancelled'
+  if (timedOut) return 'timeout'
+  return 'idle'
 }
 
 function stringifyResult(value) {
@@ -422,6 +423,7 @@ export function createRunTool(ctx) {
         return [{ type: 'text', text: stringifyResult(value) }]
       },
     },
+    timeoutMs: DEFAULT_RUN_TIMEOUT_MS,
     async execute(args, exec) {
       exec?.signal?.throwIfAborted()
       const blocked = await metaAgentError(ctx, exec?.agent)
@@ -472,7 +474,9 @@ export function createRunTool(ctx) {
       try {
         exec?.signal?.throwIfAborted()
         handle.agent.followup(createUserMessage(task.value))
-        stopReason = await waitUntilIdle(handle.agent, exec.signal)
+        stopReason = await waitUntilIdle(handle.agent, exec.signal, {
+          timeoutMs: DEFAULT_RUN_TIMEOUT_MS,
+        })
         summary = summarizeWorkerSession(handle.agent.session)
       } catch (error) {
         if (exec?.signal?.aborted) {
@@ -515,7 +519,9 @@ export function createRunTool(ctx) {
         ok: true,
         sessionId: handle.agent.session.id,
         presetId: preset.value,
-        stopReason: stopReason === 'cancelled' ? 'cancelled' : summary.lastTurnEnd,
+        stopReason: stopReason === 'cancelled' || stopReason === 'timeout'
+          ? stopReason
+          : summary.lastTurnEnd,
         toolsUsed: summary.toolsUsed,
         lastAssistantText: summary.lastAssistantText,
       }
