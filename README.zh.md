@@ -9,14 +9,16 @@ DeepSeek Harness 插件：从已有 Agent preset **分叉下一代，并在新�
 ## 安装
 
 ```sh
-dsh plugin --profile web add github:goecho/dsh-generation
+dsh plugin --profile web add github:goecho/dsh-generation#fb2f69d
 ```
 
-读过源码后请 pin 到某个 commit（`github:goecho/dsh-generation#<sha>`）。本包是纯 JavaScript，git 安装不需要 `prepare` 构建白名单。
+然后 **重启** `dsh --profile web`，让 Host profile 重新加载。读过源码后请 pin 到这个 commit，或 [提交历史](https://github.com/goecho/dsh-generation/commits/main) 里更新的 SHA。本包是纯 JavaScript，git 安装不需要 `prepare` 构建白名单。
 
-然后打开 **创造模式**（`cordis`）会话——或仍包含 `@deepseek-ai/dsh-tool-cordis` 的副本。
+然后打开 **创造模式**（`cordis`）会话——或组成里仍有插件行 `name: '@deepseek-ai/dsh-tool-cordis'` 的副本。
 
-`dsh plugin add` 装的是 **Host** profile，两个工具会在全局注册。本插件随后把它们从发行的 working preset（`standard` / `minimal` / `code`）以及所有 `origin: subagent` 的 agent（包括 `generation_run` 拉起的 worker）上藏掉。执行时仍会拒绝非创造模式调用方。
+`dsh plugin add` 装的是 **Host** profile，两个工具会在全局注册。本插件随后把它们从每一个非创造模式会话（包括用户拷贝的 `standard` / `minimal` / `code`）以及所有 `origin: subagent` 的 agent（包括 `generation_run` 拉起的 worker）上藏掉。执行时仍会拒绝非创造模式调用方。
+
+本仓库已经带有 `dsh-plugin`、`dsh`、`deepseek-harness` 这三个 GitHub topic。
 
 ## 为什么
 
@@ -57,7 +59,7 @@ Working 世代应从 `standard`、`minimal` 或 `code` 分叉。
 | 工具 | 做 | 不做 |
 | --- | --- | --- |
 | `generation_fork` | `agentPresets.copy(from, id)`；把 `purpose` 写入新 `preset.yml` 的 description；返回 id 与目录 | 接收组成 YAML（authoring 保持 copy-only）；覆盖已有 id |
-| `generation_run` | 批准后创建 agent、`mount` 该 preset、`followup(task)`，等到 idle 或取消；返回 `sessionId`、`stopReason`、用过的工具名、最后一段助手文本，然后 `dispose` | 把创造模式当 worker；继承 meta 的工具集；失败时留下半残 agent |
+| `generation_run` | 批准后创建 agent、`mount` 该 preset、`followup(task)`，等到 idle、取消或 15 分钟超时；返回 `sessionId`、`stopReason`、用过的工具名、最后一段助手文本，然后 `dispose` | 把创造模式当 worker；继承 meta 的工具集；失败时留下半残 agent |
 
 ### `generation_fork`
 
@@ -76,7 +78,7 @@ Working 世代应从 `standard`、`minimal` 或 `code` 分叉。
 | `preset` | 是 | 新 working 会话要 mount 的 preset id。不能是 `cordis`。 |
 | `task` | 是 | 给 worker 的自包含 follow-up。它看不到 meta 历史。 |
 
-若 worker 的组成里仍有 `dsh-tool-cordis`，会被拒绝。继承 meta 会话的工作区 `cwd`，记录 `origin: subagent` 和 `parentSession` 以便日志串联，并且不会把 worker 的完整逐字稿倒进 meta 上下文。
+若 worker 的组成里仍有插件行 `name: '@deepseek-ai/dsh-tool-cordis'`，会被拒绝。继承 meta 会话的工作区 `cwd`，记录 `origin: subagent` 和 `parentSession` 以便日志串联，并且不会把 worker 的完整逐字稿倒进 meta 上下文。worker 若一直不 idle，15 分钟后取消（`stopReason: "timeout"`）。领域失败仍返回 `{ ok: false }`，但会渲染成 `ERROR:`，方便模型看见。
 
 返回 `{ ok, sessionId, presetId, stopReason, toolsUsed, lastAssistantText }`。
 
@@ -85,7 +87,7 @@ Working 世代应从 `standard`、`minimal` 或 `code` 分叉。
 能分叉并跑世代的创造模式会话，按 **shell 权限** 对待。v1 的缓解：
 
 - 每次 fork、每次 run 都要人批准
-- Worker 的 preset 不能是 `cordis`，也不能仍带着 `dsh-tool-cordis`
+- Worker 的 preset 不能是 `cordis`，也不能仍带着 `@deepseek-ai/dsh-tool-cordis` 插件行
 - 编辑只发生在新 preset 目录下
 - 不会把模型写的 JavaScript 自动 `cordis_run`
 
@@ -95,9 +97,7 @@ Working 世代应从 `standard`、`minimal` 或 `code` 分叉。
 npm test
 ```
 
-没有 `@deepseek-ai/*` 运行时依赖。测试 mock 了 `ctx.tools` / `ctx.agentPresets` / `ctx.agents`。
-
-发布相关仓库时请加上 [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic。
+没有 `@deepseek-ai/*` 运行时依赖。测试 mock 了 `ctx.tools` / `ctx.agentPresets` / `ctx.agents`。GitHub Actions 在 Node 22 上跑同一套 `npm test`。
 
 ## 许可
 
