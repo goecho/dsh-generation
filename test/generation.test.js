@@ -40,6 +40,7 @@ function harness({
   const disposed = []
   const followups = []
   const cancelled = []
+  const agentSections = []
   let tools = {}
   const listeners = new Map()
   const sections = []
@@ -58,6 +59,9 @@ function harness({
         restrict(filter) {
           restricted.push(filter)
         },
+      },
+      systemPrompt: {
+        section(section) { agentSections.push(section) },
       },
     },
     followup(msg) { followups.push(msg) },
@@ -130,6 +134,7 @@ function harness({
     cancelled,
     listeners,
     sections,
+    agentSections,
   }
 }
 
@@ -279,35 +284,91 @@ test('mutations require approval while downstream veto is preserved', async () =
   )
 })
 
-test('hides tools from shipped working presets and subagents', () => {
+test('hides tools from shipped working presets and subagents', async () => {
   const restricted = []
   const agent = {
     session: { header: { origin: 'subagent' } },
-    ctx: { tools: { restrict(filter) { restricted.push(filter) } } },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section() {} },
+    },
   }
-  hideGenerationToolsIfWorker({}, agent)
+  await hideGenerationToolsIfWorker({}, agent)
   assert.deepEqual(restricted, [{ deny: [FORK_TOOL, RUN_TOOL] }])
 
   restricted.length = 0
   const standard = {
     session: { header: {} },
-    ctx: { tools: { restrict(filter) { restricted.push(filter) } } },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section() {} },
+    },
   }
-  hideGenerationToolsIfWorker({
-    agentPresets: { composedPreset: () => 'standard' },
+  await hideGenerationToolsIfWorker({
+    agentPresets: {
+      composedPreset: () => 'standard',
+      async read() { return "  name: '@deepseek-ai/dsh-tool-fs'\n" },
+    },
   }, standard)
   assert.deepEqual(restricted, [{ deny: [FORK_TOOL, RUN_TOOL] }])
   assert.ok(WORKER_BASE_PRESETS.includes('minimal'))
 
   restricted.length = 0
+  const creatorSections = []
   const creator = {
     session: { header: {} },
-    ctx: { tools: { restrict(filter) { restricted.push(filter) } } },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section(section) { creatorSections.push(section) } },
+    },
   }
-  hideGenerationToolsIfWorker({
+  await hideGenerationToolsIfWorker({
     agentPresets: { composedPreset: () => CREATOR_PRESET },
   }, creator)
   assert.deepEqual(restricted, [])
+  assert.equal(creatorSections[0].name, 'dsh-generation')
+})
+
+test('hides tools from a user copy of a working preset', async () => {
+  const restricted = []
+  const sections = []
+  const copy = {
+    session: { header: {} },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section(section) { sections.push(section) } },
+    },
+  }
+  await hideGenerationToolsIfWorker({
+    agentPresets: {
+      composedPreset: () => 'my-standard',
+      async read() { return "  name: '@deepseek-ai/dsh-tool-fs'\n" },
+    },
+  }, copy)
+  assert.deepEqual(restricted, [{ deny: [FORK_TOOL, RUN_TOOL] }])
+  assert.deepEqual(sections, [])
+})
+
+test('keeps tools on a user copy of Creator mode', async () => {
+  const restricted = []
+  const sections = []
+  const copy = {
+    session: { header: {} },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section(section) { sections.push(section) } },
+    },
+  }
+  await hideGenerationToolsIfWorker({
+    agentPresets: {
+      composedPreset: () => 'my-cordis',
+      async read() {
+        return "- id: tool-cordis\n  name: '@deepseek-ai/dsh-tool-cordis'\n"
+      },
+    },
+  }, copy)
+  assert.deepEqual(restricted, [])
+  assert.equal(sections[0].name, 'dsh-generation')
 })
 
 test('generation_fork copies then writes purpose into preset.yml', async () => {
@@ -447,12 +508,19 @@ test('generation_run is refused on a standard session', async () => {
   assert.match(result.error, /Creator mode/)
 })
 
-test('apply registers both tools and a prompt section', () => {
+test('apply registers tools and installs the prompt only on Creator agents', async () => {
   const registered = []
   const sections = []
+  const agentSections = []
+  const restricted = []
   const listeners = new Map()
+  let composedPreset = 'cordis'
+  let composition = "  name: '@deepseek-ai/dsh-tool-cordis'\n"
   const ctx = {
-    agentPresets: { composedPreset: () => 'cordis' },
+    agentPresets: {
+      composedPreset: () => composedPreset,
+      async read() { return composition },
+    },
     agents: {},
     tools: {
       register(definition) { registered.push(definition.name) },
@@ -463,8 +531,33 @@ test('apply registers both tools and a prompt section', () => {
   }
   apply(ctx)
   assert.deepEqual(registered, [FORK_TOOL, RUN_TOOL])
-  assert.equal(sections[0].name, 'dsh-generation')
-  assert.match(sections[0].text({ agent: { ctx: {} } }), /make, not a compiler/)
+  assert.equal(sections.length, 0)
   assert.ok(listeners.has('tools/pre-execute'))
   assert.ok(listeners.has('agent/created'))
+
+  const created = listeners.get('agent/created').callback
+  const creator = {
+    session: { header: {} },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section(section) { agentSections.push(section) } },
+    },
+  }
+  await created({ agent: creator })
+  assert.deepEqual(restricted, [])
+  assert.equal(agentSections[0].name, 'dsh-generation')
+  assert.match(agentSections[0].text, /make, not a compiler/)
+
+  composedPreset = 'my-standard'
+  composition = "  name: '@deepseek-ai/dsh-tool-fs'\n"
+  const working = {
+    session: { header: {} },
+    ctx: {
+      tools: { restrict(filter) { restricted.push(filter) } },
+      systemPrompt: { section(section) { agentSections.push(section) } },
+    },
+  }
+  await created({ agent: working })
+  assert.deepEqual(restricted, [{ deny: [FORK_TOOL, RUN_TOOL] }])
+  assert.equal(agentSections.length, 1)
 })

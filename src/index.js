@@ -7,8 +7,8 @@ export const name = 'dsh-generation'
 
 /**
  * Host-plane plugin: the two tools register globally, then this plugin hides
- * them from shipped working presets and from every `origin: subagent` agent
- * (including `generation_run` workers).
+ * them from every non-Creator session and from every `origin: subagent` agent
+ * (including `generation_run` workers). Creator sessions get a scoped prompt.
  */
 export const inject = ['tools', 'agentPresets', 'agents', 'systemPrompt']
 
@@ -163,6 +163,19 @@ export function denyGenerationTools(agent) {
   }
 }
 
+/** Attach the generation prompt to one Creator agent. Empty global sections are not registered. */
+export function installGenerationPrompt(agent) {
+  try {
+    agent.ctx.systemPrompt.section({
+      name: 'dsh-generation',
+      order: 180,
+      text: GENERATION_SECTION,
+    })
+  } catch {
+    // Missing systemPrompt on this agent, or the section is already there.
+  }
+}
+
 function composedPresetId(ctx, agent) {
   try {
     return ctx.agentPresets.composedPreset(agent.ctx)
@@ -172,26 +185,35 @@ function composedPresetId(ctx, agent) {
 }
 
 /**
- * Shipped working presets and every subagent must not see these tools.
- * Creator mode and copies of it keep them.
+ * Non-Creator sessions and every subagent must not see these tools.
+ * Creator mode and copies of it keep them and receive the scoped prompt.
  */
-export function hideGenerationToolsIfWorker(ctx, agent) {
+export async function hideGenerationToolsIfWorker(ctx, agent) {
   if (agent?.session?.header?.origin === 'subagent') {
     denyGenerationTools(agent)
     return
   }
   const presetId = composedPresetId(ctx, agent)
-  if (WORKER_BASE_PRESETS.includes(presetId)) denyGenerationTools(agent)
-}
-
-function generationToolsVisible(ctx, agent) {
-  if (agent === undefined) return false
-  try {
-    if (ctx.tools.get(FORK_TOOL, agent) !== undefined) return true
-  } catch {
-    // get() may require a scope key rather than the Agent object.
+  if (presetId === CREATOR_PRESET) {
+    installGenerationPrompt(agent)
+    return
   }
-  return composedPresetId(ctx, agent) === CREATOR_PRESET
+  if (presetId === undefined) {
+    denyGenerationTools(agent)
+    return
+  }
+  let composition
+  try {
+    composition = await ctx.agentPresets.read(presetId)
+  } catch {
+    denyGenerationTools(agent)
+    return
+  }
+  if (looksLikeCreatorComposition(composition)) {
+    installGenerationPrompt(agent)
+    return
+  }
+  denyGenerationTools(agent)
 }
 
 async function metaAgentError(ctx, agent) {
@@ -538,9 +560,7 @@ function isGenerationTool(name) {
 }
 
 export function apply(ctx) {
-  ctx.on('agent/created', ({ agent }) => {
-    hideGenerationToolsIfWorker(ctx, agent)
-  })
+  ctx.on('agent/created', ({ agent }) => hideGenerationToolsIfWorker(ctx, agent))
 
   ctx.on('tools/pre-execute', async (execution, next) => {
     const decision = await next()
@@ -550,12 +570,6 @@ export function apply(ctx) {
       : 'Start a new working agent on a forked preset and run a task to idle.'
     return { kind: 'ask', reason }
   }, { prepend: true })
-
-  ctx.systemPrompt.section({
-    name: 'dsh-generation',
-    order: 180,
-    text: (context) => (generationToolsVisible(ctx, context.agent) ? GENERATION_SECTION : ''),
-  })
 
   ctx.tools.register(createForkTool(ctx))
   ctx.tools.register(createRunTool(ctx))
