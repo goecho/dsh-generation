@@ -312,6 +312,14 @@ function stringifyResult(value) {
   return JSON.stringify(value, null, 2)
 }
 
+function renderToolValue(_args, value) {
+  const body = stringifyResult(value)
+  if (isRecord(value) && value.ok === false) {
+    return [{ type: 'text', text: `ERROR: ${body}` }]
+  }
+  return [{ type: 'text', text: body }]
+}
+
 export function createForkTool(ctx) {
   return {
     name: FORK_TOOL,
@@ -351,9 +359,7 @@ export function createForkTool(ctx) {
         required: ['ok'],
         additionalProperties: false,
       },
-      render(_args, value) {
-        return [{ type: 'text', text: stringifyResult(value) }]
-      },
+      render: renderToolValue,
     },
     async execute(args, exec) {
       exec?.signal?.throwIfAborted()
@@ -445,9 +451,7 @@ export function createRunTool(ctx) {
         required: ['ok'],
         additionalProperties: false,
       },
-      render(_args, value) {
-        return [{ type: 'text', text: stringifyResult(value) }]
-      },
+      render: renderToolValue,
     },
     timeoutMs: DEFAULT_RUN_TIMEOUT_MS,
     async execute(args, exec) {
@@ -491,7 +495,7 @@ export function createRunTool(ctx) {
           },
         })
       } catch (error) {
-        return failed(error instanceof Error ? error.message : String(error))
+        throw error instanceof Error ? error : new Error(String(error))
       }
 
       let stopReason = 'idle'

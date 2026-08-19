@@ -508,6 +508,40 @@ test('generation_run is refused on a standard session', async () => {
   assert.match(result.error, /Creator mode/)
 })
 
+test('domain failures render as ERROR so the model notices', () => {
+  const tool = createForkTool({
+    agentPresets: { composedPreset: () => 'cordis', async read() { return '' } },
+  })
+  const blocks = tool.output.render({}, { ok: false, error: 'id must match' })
+  assert.equal(blocks.length, 1)
+  assert.match(blocks[0].text, /^ERROR:/)
+  assert.match(blocks[0].text, /id must match/)
+
+  const ok = tool.output.render({}, { ok: true, id: 'gen-1' })
+  assert.equal(ok[0].text.startsWith('ERROR:'), false)
+  assert.match(ok[0].text, /"id": "gen-1"/)
+})
+
+test('generation_run throws when agent create fails before a handle exists', async () => {
+  const bench = harness({
+    compositionById: {
+      cordis: "  name: '@deepseek-ai/dsh-tool-cordis'\n",
+      'gen-1': "  name: '@deepseek-ai/dsh-tool-fs'\n",
+    },
+    createImpl: async () => {
+      throw new Error('agents.create exploded')
+    },
+  })
+  await assert.rejects(
+    () => createRunTool(bench.ctx).execute(
+      { preset: 'gen-1', task: 'hello' },
+      { agent: bench.agent, signal: new AbortController().signal },
+    ),
+    /agents\.create exploded/,
+  )
+  assert.equal(bench.disposed.length, 0)
+})
+
 test('apply registers tools and installs the prompt only on Creator agents', async () => {
   const registered = []
   const sections = []
