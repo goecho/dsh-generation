@@ -16,6 +16,9 @@ export const FORK_TOOL = 'generation_fork'
 export const RUN_TOOL = 'generation_run'
 export const METADATA_FILE = 'preset.yml'
 export const CREATOR_PLUGIN = 'dsh-tool-cordis'
+export const CREATOR_PLUGIN_NAME = '@deepseek-ai/dsh-tool-cordis'
+/** A plugin row `name:` for Creator mode, not a comment that merely mentions it. */
+export const CREATOR_NAME_LINE = /^\s*name:\s*['"]?@deepseek-ai\/dsh-tool-cordis['"]?\s*(?:#.*)?$/m
 export const CREATOR_PRESET = 'cordis'
 export const WORKER_BASE_PRESETS = Object.freeze(['standard', 'minimal', 'code'])
 export const PRESET_ID = /^[a-z0-9][a-z0-9-]*$/
@@ -45,7 +48,7 @@ const FORK_DESCRIPTION = [
 const RUN_DESCRIPTION = [
   'Create a NEW agent, mount the named preset, send `task` as a follow-up, wait until idle or cancel, then dispose.',
   'Inherits this session\'s workspace cwd and records origin=subagent plus parentSession.',
-  'Refuses Creator mode (cordis) and any preset that still includes dsh-tool-cordis.',
+  'Refuses Creator mode (cordis) and any preset whose composition still names @deepseek-ai/dsh-tool-cordis.',
   'Returns a summary only — not the worker transcript. Requires human approval.',
 ].join(' ')
 
@@ -146,8 +149,9 @@ function failed(error) {
   return { ok: false, error }
 }
 
-function looksLikeCreatorComposition(composition) {
-  return typeof composition === 'string' && composition.includes(CREATOR_PLUGIN)
+/** True when the composition YAML has a plugin row named `@deepseek-ai/dsh-tool-cordis`. */
+export function looksLikeCreatorComposition(composition) {
+  return typeof composition === 'string' && CREATOR_NAME_LINE.test(composition)
 }
 
 /** Hide the two tools from one agent. Unknown/non-global names are ignored. */

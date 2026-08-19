@@ -14,6 +14,7 @@ import {
   createUserMessage,
   hideGenerationToolsIfWorker,
   isPresetId,
+  looksLikeCreatorComposition,
   renderPresetYml,
   summarizeWorkerSession,
   waitUntilIdle,
@@ -131,6 +132,29 @@ function harness({
     sections,
   }
 }
+
+test('creator detection matches a YAML name row, not a comment', () => {
+  assert.equal(
+    looksLikeCreatorComposition("- id: tool-cordis\n  name: '@deepseek-ai/dsh-tool-cordis'\n"),
+    true,
+  )
+  assert.equal(
+    looksLikeCreatorComposition('  name: "@deepseek-ai/dsh-tool-cordis"\n'),
+    true,
+  )
+  assert.equal(
+    looksLikeCreatorComposition('  name: @deepseek-ai/dsh-tool-cordis\n'),
+    true,
+  )
+  assert.equal(
+    looksLikeCreatorComposition("# leftover note about dsh-tool-cordis\n- id: tool-fs\n  name: '@deepseek-ai/dsh-tool-fs'\n"),
+    false,
+  )
+  assert.equal(
+    looksLikeCreatorComposition("# name: '@deepseek-ai/dsh-tool-cordis'\n"),
+    false,
+  )
+})
 
 test('preset ids match the roster containment pattern', () => {
   assert.equal(isPresetId('standard'), true)
@@ -360,8 +384,8 @@ test('generation_run refuses cordis and creator-capable copies', async () => {
 
   const withCreator = harness({
     compositionById: {
-      cordis: 'dsh-tool-cordis',
-      'almost-worker': 'name: @deepseek-ai/dsh-tool-cordis',
+      cordis: "  name: '@deepseek-ai/dsh-tool-cordis'\n",
+      'almost-worker': "- id: tool-cordis\n  name: '@deepseek-ai/dsh-tool-cordis'\n",
     },
   })
   const refused = await createRunTool(withCreator.ctx).execute(
@@ -370,13 +394,25 @@ test('generation_run refuses cordis and creator-capable copies', async () => {
   )
   assert.equal(refused.ok, false)
   assert.match(refused.error, /still includes dsh-tool-cordis/)
+
+  const commentOnly = harness({
+    compositionById: {
+      cordis: "  name: '@deepseek-ai/dsh-tool-cordis'\n",
+      'gen-comment': "# leftover note about dsh-tool-cordis\n  name: '@deepseek-ai/dsh-tool-fs'\n",
+    },
+  })
+  const allowed = await createRunTool(commentOnly.ctx).execute(
+    { preset: 'gen-comment', task: 'hello' },
+    { agent: commentOnly.agent, signal: new AbortController().signal },
+  )
+  assert.equal(allowed.ok, true)
 })
 
 test('generation_run mounts, follows up, summarizes, and disposes', async () => {
   const bench = harness({
     compositionById: {
-      cordis: 'dsh-tool-cordis',
-      'gen-1': 'name: @deepseek-ai/dsh-tool-fs',
+      cordis: "  name: '@deepseek-ai/dsh-tool-cordis'\n",
+      'gen-1': "  name: '@deepseek-ai/dsh-tool-fs'\n",
     },
   })
   const result = await createRunTool(bench.ctx).execute(
