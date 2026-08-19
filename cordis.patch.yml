@@ -1,0 +1,5 @@
+# Fork a known-good agent preset and run a task on the next generation.
+# Make, not a compiler: this row does not write agent.cordis.yml.
+- insert:
+    - id: dsh-generation
+      name: dsh-generation

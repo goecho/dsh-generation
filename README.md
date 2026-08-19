@@ -6,6 +6,18 @@ A DeepSeek Harness plugin that **forks agent presets and runs a task on the next
 
 It is **make, not a compiler**. Creator mode is already the compiler: it can inspect the runtime, edit files, and author presets. This plugin only records a lineage — copy a known-good preset, let the meta agent edit that copy with ordinary `fs` / `bash`, then start a **new** working session on it.
 
+## Install
+
+```sh
+dsh plugin --profile web add github:goecho/dsh-generation
+```
+
+Pin a commit (`github:goecho/dsh-generation#<sha>`) after you have read the source. The package is plain JavaScript, so git installs do not need a `prepare` build allowlist.
+
+Then open a **Creator mode** (`cordis`) session — or a copy of that preset that still includes `@deepseek-ai/dsh-tool-cordis`.
+
+`dsh plugin add` installs into the **host** profile, so the two tools are registered globally. This plugin then hides them from the shipped working presets (`standard`, `minimal`, `code`) and from every agent with `origin: subagent`, including the workers `generation_run` starts. Execute still refuses a non-Creator caller.
+
 ## Why
 
 DeepSeek Harness splits composition into a Host plane (sandbox, model route, persistence) and an Agent plane (tools, persona, prompt). A session’s preset is locked once a turn has run, so you cannot hot-swap the working agent’s toolset without stranding logged tool calls.
@@ -18,6 +30,7 @@ The useful bootstrap is the same as a C compiler: **each generation is a new bin
 - Not a way to recompose the current session, or to give an in-process subagent a different preset
 - Not a YAML/JS generator, scorer, or auto-promoter of the default creator
 - Not a Host-plane kernel: it does not add services, session event types, or sandbox backends
+- It does **not** depend on `@deepseek-ai/dsh-tools` / `@deepseek-ai/dsh-llm`. Tools are registered as raw definitions so a second copy of those packages cannot split the host’s module identity.
 
 ## Design
 
@@ -37,37 +50,54 @@ meta session  (cordis + this plugin)
   → fork again or stop
 ```
 
-Mount this plugin **only on Creator mode** (or a copy of it). Working generations fork from `standard`, `minimal`, or `code`, and must not include these tools.
+Working generations should fork from `standard`, `minimal`, or `code`.
 
 ## Tools
 
 | Tool | Does | Does not |
 | --- | --- | --- |
-| `generation_fork` | `agentPresets.copy(from, id)`; writes `purpose` into the new `preset.yml` description; returns id and path | Accept composition YAML (authoring stays copy-only); overwrite an existing id |
+| `generation_fork` | `agentPresets.copy(from, id)`; writes `purpose` into the new `preset.yml` description; returns id and directory | Accept composition YAML (authoring stays copy-only); overwrite an existing id |
 | `generation_run` | After approval, create an agent, `mount` the preset, `followup(task)`, wait until idle or cancel, return `sessionId`, `stopReason`, tool names used, last assistant text, then `dispose` | Run Creator mode as the worker; inherit the meta toolset; leave a half-created agent on failure |
 
-`generation_run` inherits the meta session’s workspace `cwd`, records `origin: subagent` and `parentSession` so logs chain, and does not dump the full worker transcript into the meta context.
+### `generation_fork`
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `from` | yes | Preset id to copy. Prefer `standard`, `minimal`, or `code`. |
+| `id` | yes | New preset id (`/^[a-z0-9][a-z0-9-]*$/`). Must not already exist. |
+| `purpose` | yes | One sentence written into the new `preset.yml` description. |
+
+Returns `{ ok, id, from, purpose, path, compositionPath }` where `path` is the preset directory.
+
+### `generation_run`
+
+| Argument | Required | Meaning |
+| --- | --- | --- |
+| `preset` | yes | Preset id to mount on the new working session. Must not be `cordis`. |
+| `task` | yes | Self-contained follow-up for the worker. It does not see meta history. |
+
+Refuses a worker whose composition still includes `dsh-tool-cordis`. Inherits the meta session’s workspace `cwd`, records `origin: subagent` and `parentSession` so logs chain, and does not dump the full worker transcript into the meta context.
+
+Returns `{ ok, sessionId, presetId, stopReason, toolsUsed, lastAssistantText }`.
 
 ## Trust
 
 Treat a Creator session that can fork and run generations as **shell access**. Mitigation in v1:
 
 - Human approval on every fork and every run
-- Worker preset cannot be `cordis`
+- Worker preset cannot be `cordis`, and cannot still carry `dsh-tool-cordis`
 - Edits belong under the new preset directory
 - Model-written JavaScript is never auto-mounted via `cordis_run`
 
-## Status
-
-Design is fixed; implementation is next. Install and tool schemas will land with the first package.
-
-Intended install (not available yet):
+## Develop
 
 ```sh
-dsh plugin --profile web add github:goecho/dsh-generation
+node --test generation.test.js
 ```
 
-Then use it from a Creator-mode session. Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic when publishing related repos.
+There are no `@deepseek-ai/*` runtime dependencies. The tests mock `ctx.tools` / `ctx.agentPresets` / `ctx.agents`.
+
+Add the [`dsh-plugin`](https://github.com/topics/dsh-plugin) topic when publishing related repos.
 
 ## License
 

@@ -1,0 +1,46 @@
+{
+  "name": "dsh-generation",
+  "version": "0.1.0",
+  "description": "Fork agent presets and run tasks on the next generation. Make, not a compiler.",
+  "license": "MIT",
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "generation",
+    "preset"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/goecho/dsh-generation.git"
+  },
+  "homepage": "https://github.com/goecho/dsh-generation#readme",
+  "bugs": {
+    "url": "https://github.com/goecho/dsh-generation/issues"
+  },
+  "type": "module",
+  "main": "generation.js",
+  "exports": {
+    ".": "./generation.js",
+    "./generation": "./generation.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "generation.js",
+    "LICENSE",
+    "README.md",
+    "README.zh.md"
+  ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "test": "node --test generation.test.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
