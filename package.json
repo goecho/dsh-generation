@@ -19,15 +19,14 @@
     "url": "https://github.com/goecho/dsh-generation/issues"
   },
   "type": "module",
-  "main": "generation.js",
+  "main": "./src/index.js",
   "exports": {
-    ".": "./generation.js",
-    "./generation": "./generation.js",
+    ".": "./src/index.js",
     "./package.json": "./package.json"
   },
   "files": [
     "cordis.patch.yml",
-    "generation.js",
+    "src",
     "LICENSE",
     "README.md",
     "README.zh.md"
@@ -36,7 +35,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "scripts": {
-    "test": "node --test generation.test.js"
+    "test": "node --test"
   },
   "dsh": {
     "bundle": {

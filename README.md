@@ -92,7 +92,7 @@ Treat a Creator session that can fork and run generations as **shell access**. M
 ## Develop
 
 ```sh
-node --test generation.test.js
+npm test
 ```
 
 There are no `@deepseek-ai/*` runtime dependencies. The tests mock `ctx.tools` / `ctx.agentPresets` / `ctx.agents`.

@@ -17,7 +17,7 @@ import {
   renderPresetYml,
   summarizeWorkerSession,
   waitUntilIdle,
-} from './generation.js'
+} from '../src/index.js'
 
 function message(role, text) {
   return { role, content: [{ type: 'text', text }] }

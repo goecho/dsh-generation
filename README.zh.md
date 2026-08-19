@@ -92,7 +92,7 @@ Working 世代应从 `standard`、`minimal` 或 `code` 分叉。
 ## 开发
 
 ```sh
-node --test generation.test.js
+npm test
 ```
 
 没有 `@deepseek-ai/*` 运行时依赖。测试 mock 了 `ctx.tools` / `ctx.agentPresets` / `ctx.agents`。
